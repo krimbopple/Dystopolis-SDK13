@@ -173,8 +173,8 @@ void CHudDeathNotice::Paint()
 
 		if( g_PR )
 		{
-			iKillerTeam = g_PR->GetTeam( m_DeathNotices[i].Killer.iEntIndex );
-			iVictimTeam = g_PR->GetTeam( m_DeathNotices[i].Victim.iEntIndex );
+			iKillerTeam = ( m_DeathNotices[i].Killer.iEntIndex > 0 ) ? g_PR->GetTeam( m_DeathNotices[i].Killer.iEntIndex ) : TEAM_UNASSIGNED;
+			iVictimTeam = ( m_DeathNotices[i].Victim.iEntIndex > 0 ) ? g_PR->GetTeam( m_DeathNotices[i].Victim.iEntIndex ) : TEAM_UNASSIGNED;
 		}
 
 		g_pVGuiLocalize->ConvertANSIToUnicode( m_DeathNotices[i].Victim.szName, victim, sizeof( victim ) );
@@ -301,8 +301,8 @@ void CHudDeathNotice::FireGameEvent( IGameEvent * event )
 	}
 
 	// Get the names of the players
-	const char *killer_name = g_PR->GetPlayerName( killer );
-	const char *victim_name = g_PR->GetPlayerName( victim );
+	const char *killer_name = ( killer > 0 ) ? g_PR->GetPlayerName( killer ) : "";
+	const char *victim_name = ( victim > 0 ) ? g_PR->GetPlayerName( victim ) : "";
 
 	if ( !killer_name )
 		killer_name = "";
@@ -316,7 +316,7 @@ void CHudDeathNotice::FireGameEvent( IGameEvent * event )
 	Q_strncpy( deathMsg.Killer.szName, killer_name, MAX_PLAYER_NAME_LENGTH );
 	Q_strncpy( deathMsg.Victim.szName, victim_name, MAX_PLAYER_NAME_LENGTH );
 	deathMsg.flDisplayTime = gpGlobals->curtime + hud_deathnotice_time.GetFloat();
-	deathMsg.iSuicide = ( !killer || killer == victim );
+	deathMsg.iSuicide = ( killer <= 0 || killer == victim );
 
 	// Try and find the death identifier in the icon list
 	deathMsg.iconDeath = gHUD.GetIcon( fullkilledwith );
