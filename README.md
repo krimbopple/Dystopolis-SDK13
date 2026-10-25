@@ -1,16 +1,10 @@
-# Source SDK 2013
+# Dystopolis
 
-Source code for Source SDK 2013.
+Source SDK 2013 multiplayer base for the Dystopolis mod.
 
-Contains the game code for Half-Life 2, HL2: DM and TF2.
-
-**Now including Team Fortress 2! ✨**
+Based on the Half-Life 2: Deathmatch game code.
 
 ## Build instructions
-
-Clone the repository using the following command:
-
-`git clone https://github.com/ValveSoftware/source-sdk-2013`
 
 ### Windows
 
@@ -49,7 +43,7 @@ This will build all the projects related to the SDK and your mods automatically 
 
 You can then, in the root of the cloned directory, you can navigate to `game` and run your mod by launching the build launcher for your mod project, eg:
 ```bash
-./mod_tf
+./mod_dystopolis
 ```
 
 *Mods that are distributed on Steam MUST be built against the Steam Runtime, which the above steps will automatically do for you.*
