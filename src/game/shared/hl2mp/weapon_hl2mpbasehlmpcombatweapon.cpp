@@ -450,12 +450,11 @@ void CBaseHL2MPCombatWeapon::AddViewmodelBob( CBaseViewModel *viewmodel, Vector 
 
 	s_flRecoil += ( flRecoilTarget - s_flRecoil ) * MIN( 1.0f, flDeltaTime * 18.0f );
 
-	float flRecoilPitch = MIN( s_flRecoil, 6.0f );
+	float flRecoilPitch = MIN( s_flRecoil, 8.0f );
 
-	angles[PITCH] += flRecoilPitch * 1.2f;
 	angles[YAW] += punch.y * 0.35f;
 	angles[ROLL] += punch.z * 0.35f;
-	VectorMA( origin, -flRecoilPitch * 0.08f, forward, origin );
+	VectorMA( origin, -flRecoilPitch * 1.25f, forward, origin );
 }
 
 //-----------------------------------------------------------------------------

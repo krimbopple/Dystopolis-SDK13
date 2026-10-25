@@ -32,7 +32,7 @@
 
 
 // Half-Life Server Configuration Layout Script (stores last settings chosen, too)
-// File generated:  Sat Oct 24 10:58:40 PM
+// File generated:  Sun Oct 25 03:44:18 PM
 //
 //
 // Cvar	-	Setting
@@ -80,7 +80,7 @@ DESCRIPTION SERVER_OPTIONS
 	{
 		"#Valve_Teamplay"
 		{ BOOL }
-		{ "0" }
+		{ "1" }
 	}
 
 	"mp_weaponstay"

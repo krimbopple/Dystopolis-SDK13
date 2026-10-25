@@ -931,9 +931,18 @@ int CStudioHdr::GetNumSeq( void ) const
 
 mstudioseqdesc_t &CStudioHdr::pSeqdesc( int i )
 {
-	Assert( ( i >= 0 && i < GetNumSeq() ) || ( i == 1 && GetNumSeq() <= 1 ) );
 	if ( i < 0 || i >= GetNumSeq() )
 	{
+		if ( i != 1 || GetNumSeq() > 1 )
+		{
+			static int s_nOutOfRangeWarnings = 0;
+			if ( s_nOutOfRangeWarnings < 3 )
+			{
+				s_nOutOfRangeWarnings++;
+				Warning( "CStudioHdr::pSeqdesc: sequence %d out of range (%d sequences)\n", i, GetNumSeq() );
+			}
+		}
+
 		if ( GetNumSeq() <= 0 )
 		{
 			// Return a zero'd out struct reference if we've got nothing.

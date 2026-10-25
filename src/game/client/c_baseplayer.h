@@ -473,6 +473,10 @@ protected:
 	// used by client side player footsteps 
 	surfacedata_t* GetGroundSurface();
 
+public:
+	float GetStepSoundTime() const { return m_flStepSoundTime; }
+
+protected:
 	virtual void	FireGameEvent( IGameEvent *event );
 
 protected:

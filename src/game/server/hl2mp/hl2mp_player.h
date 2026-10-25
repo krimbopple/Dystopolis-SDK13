@@ -76,6 +76,7 @@ public:
 	virtual void Weapon_Drop( CBaseCombatWeapon *pWeapon, const Vector *pvecTarget = NULL, const Vector *pVelocity = NULL );
 	virtual void UpdateOnRemove( void );
 	virtual void DeathSound( const CTakeDamageInfo &info );
+	virtual void OnDamagedByExplosion( const CTakeDamageInfo &info );
 	virtual CBaseEntity* EntSelectSpawnPoint( void );
 		
 	int FlashlightIsOn( void );
@@ -103,6 +104,7 @@ public:
 	float GetNextModelChangeTime( void ) { return m_flNextModelChangeTime; }
 	float GetNextTeamChangeTime( void ) { return m_flNextTeamChangeTime; }
 	void  PickDefaultSpawnTeam( void );
+	void  EnterTeamSelect( void );
 	void  SetupPlayerSoundsByModel( const char *pModelName );
 	const char *GetPlayerModelSoundPrefix( void );
 	int	  GetPlayerModelType( void ) { return m_iPlayerSoundType;	}

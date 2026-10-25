@@ -21,6 +21,7 @@
 #include "eventqueue.h"
 #include "gamestats.h"
 #include "ammodef.h"
+#include "viewport_panel_names.h"
 #include "NextBot.h"
 
 #include "engine/IEngineSound.h"
@@ -199,6 +200,7 @@ void CHL2MP_Player::Precache( void )
 	PrecacheScriptSound( "NPC_MetroPolice.Die" );
 	PrecacheScriptSound( "NPC_CombineS.Die" );
 	PrecacheScriptSound( "NPC_Citizen.die" );
+	PrecacheSound( "VGS_ExploDeath2.mp3" );
 }
 
 void CHL2MP_Player::GiveAllItems( void )
@@ -299,7 +301,7 @@ void CHL2MP_Player::PickDefaultSpawnTeam( void )
 				ChangeTeam( TEAM_UNASSIGNED );
 			}
 		}
-		else
+		else if ( IsFakeClient() )
 		{
 			CTeam *pCombine = g_Teams[TEAM_COMBINE];
 			CTeam *pRebels = g_Teams[TEAM_REBELS];
@@ -327,11 +329,42 @@ void CHL2MP_Player::PickDefaultSpawnTeam( void )
 	}
 }
 
+void CHL2MP_Player::EnterTeamSelect( void )
+{
+	if ( IsObserver() || GetTeamNumber() != TEAM_UNASSIGNED )
+		return;
+
+	CBaseEntity *pViewSpot = gEntList.FindEntityByClassname( NULL, "info_player_deathmatch" );
+	if ( !pViewSpot )
+		pViewSpot = gEntList.FindEntityByClassname( NULL, "info_player_start" );
+
+	if ( pViewSpot )
+	{
+		SetAbsOrigin( pViewSpot->GetAbsOrigin() );
+		SetAbsAngles( pViewSpot->GetAbsAngles() );
+	}
+
+	m_bEnterObserver = true;
+	StartObserverMode( OBS_MODE_ROAMING );
+	m_bEnterObserver = false;
+
+	m_Local.m_iHideHUD = HIDEHUD_ALL;
+
+	ShowViewPortPanel( PANEL_SPECGUI, false );
+	ShowViewPortPanel( PANEL_TEAM, true );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Sets HL2 specific defaults.
 //-----------------------------------------------------------------------------
 void CHL2MP_Player::Spawn(void)
 {
+	if ( HL2MPRules()->IsTeamplay() && GetTeamNumber() == TEAM_UNASSIGNED && !IsFakeClient() )
+	{
+		EnterTeamSelect();
+		return;
+	}
+
 	m_flNextModelChangeTime = 0.0f;
 	m_flNextTeamChangeTime = 0.0f;
 
@@ -1016,6 +1049,8 @@ bool CHL2MP_Player::HandleCommand_JoinTeam( int team )
 		return false;
 	}
 
+	bool bWasObserver = IsObserver();
+
 	if ( team == TEAM_SPECTATOR )
 	{
 		// Prevent this is the cvar is set
@@ -1047,6 +1082,11 @@ bool CHL2MP_Player::HandleCommand_JoinTeam( int team )
 
 	// Switch their actual team...
 	ChangeTeam( team );
+
+	if ( bWasObserver && GetTeamNumber() == team )
+	{
+		Spawn();
+	}
 
 	return true;
 }
@@ -1302,6 +1342,9 @@ void CHL2MP_Player::Event_Killed( const CTakeDamageInfo &info )
 	CTakeDamageInfo subinfo = info;
 	subinfo.SetDamageForce( m_vecTotalBulletForce );
 
+	CSingleUserRecipientFilter dspFilter( this );
+	enginesound->SetPlayerDSP( dspFilter, 0, false );
+
 	SetNumAnimOverlays( 0 );
 
 	// Note: since we're dead, it won't draw us on the client, but we don't set EF_NODRAW
@@ -1355,10 +1398,52 @@ int CHL2MP_Player::OnTakeDamage( const CTakeDamageInfo &inputInfo )
 	return BaseClass::OnTakeDamage( inputInfo );
 }
 
+void CHL2MP_Player::OnDamagedByExplosion( const CTakeDamageInfo &info )
+{
+	if ( GetHealth() <= 0 )
+		return;
+
+	BaseClass::OnDamagedByExplosion( info );
+}
+
 void CHL2MP_Player::DeathSound( const CTakeDamageInfo &info )
 {
 	if ( m_hRagdoll && m_hRagdoll->GetBaseAnimating()->IsDissolving() )
 		 return;
+
+	// Probably need a better way to do this stuff!
+	if ( GetTeamNumber() == TEAM_COMBINE && ( info.GetDamageType() & DMG_BLAST ) )
+	{
+		Vector vecOrigin = GetAbsOrigin();
+
+		CSingleUserRecipientFilter selfFilter( this );
+		selfFilter.MakeReliable();
+
+		EmitSound_t selfSound;
+		selfSound.m_nChannel = CHAN_VOICE;
+		selfSound.m_pSoundName = "VGS_ExploDeath2.mp3";
+		selfSound.m_SoundLevel = SNDLVL_NONE;
+		selfSound.m_pOrigin = &vecOrigin;
+		EmitSound( selfFilter, entindex(), selfSound );
+
+		if ( m_hRagdoll )
+		{
+			Vector vecRagdollOrigin = m_hRagdoll->GetAbsOrigin();
+
+			CRecipientFilter ragdollFilter;
+			ragdollFilter.AddRecipientsByPAS( vecRagdollOrigin );
+			ragdollFilter.RemoveRecipient( this );
+
+			EmitSound_t ragdollSound;
+			ragdollSound.m_nChannel = CHAN_VOICE;
+			ragdollSound.m_pSoundName = "VGS_ExploDeath2.mp3";
+			ragdollSound.m_SoundLevel = SNDLVL_80dB;
+			ragdollSound.m_pOrigin = &vecRagdollOrigin;
+			EmitSound( ragdollFilter, m_hRagdoll->entindex(), ragdollSound );
+		}
+
+		return;
+	}
 
 	char szStepSound[128];
 

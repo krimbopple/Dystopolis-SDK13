@@ -641,6 +641,28 @@ Scheme
 				"custom"	"1" [$OSX]
 			}
 		}
+		DPRoundTimerFont
+		{
+			"1"
+			{
+				"name"		"Arial"
+				"tall"		"48"
+				"tall_hidef"	"52"
+				"weight"	"700"
+				"antialias"	"1"
+			}
+		}
+		DPRoundLabelFont
+		{
+			"1"
+			{
+				"name"		"Arial"
+				"tall"		"18"
+				"tall_hidef"	"20"
+				"weight"	"400"
+				"antialias"	"1"
+			}
+		}
 		CreditsLogo
 		{
 			"1"
@@ -692,10 +714,10 @@ Scheme
 			// note that this scales with the screen resolution
 			"1"
 			{
-				"name"		"Trebuchet MS" [!$OSX]
-				"name"		"Helvetica" [$OSX]
+				"name"		"Arial" [!$OSX]
+				"name"		"Arial" [$OSX]
 				"tall"		"18"
-				"weight"	"900"
+				"weight"	"700"
 				"antialias" "1"
 				"additive"	"1"
 			}

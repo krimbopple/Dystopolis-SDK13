@@ -41,8 +41,16 @@ extern bool			g_fGameOver;
 void FinishClientPutInServer( CHL2MP_Player *pPlayer )
 {
 	pPlayer->InitialSpawn();
-	pPlayer->Spawn();
 
+	bool bNeedsTeam = HL2MPRules()->IsTeamplay() && pPlayer->GetTeamNumber() == TEAM_UNASSIGNED && !pPlayer->IsFakeClient();
+	if ( bNeedsTeam )
+	{
+		pPlayer->EnterTeamSelect();
+	}
+	else
+	{
+		pPlayer->Spawn();
+	}
 
 	char sName[128];
 	Q_strncpy( sName, pPlayer->GetPlayerName(), sizeof( sName ) );
@@ -57,6 +65,12 @@ void FinishClientPutInServer( CHL2MP_Player *pPlayer )
 
 	// notify other clients of player joining the game
 	UTIL_ClientPrintAll( HUD_PRINTNOTIFY, "#Game_connected", sName[0] != 0 ? sName : "<unconnected>" );
+
+	if ( bNeedsTeam )
+	{
+		ClientPrint( pPlayer, HUD_PRINTCENTER, "CHOOSE YOUR FACTION" );
+		return;
+	}
 
 	if ( HL2MPRules()->IsTeamplay() == true )
 	{

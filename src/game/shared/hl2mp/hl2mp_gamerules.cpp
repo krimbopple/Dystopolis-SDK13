@@ -31,6 +31,8 @@
 	#include "weapon_hl2mpbasehlmpcombatweapon.h"
 	#include "team.h"
 	#include "voice_gamemgr.h"
+	#include "util.h"
+	#include "baseplayer_shared.h"
 	#include "hl2mp_gameinterface.h"
 	#include "hl2mp_cvars.h"
 
@@ -41,6 +43,13 @@ extern bool FindInList( const char **pStrings, const char *pToFind );
 ConVar sv_hl2mp_weapon_respawn_time( "sv_hl2mp_weapon_respawn_time", "20", FCVAR_GAMEDLL | FCVAR_NOTIFY );
 ConVar sv_hl2mp_item_respawn_time( "sv_hl2mp_item_respawn_time", "30", FCVAR_GAMEDLL | FCVAR_NOTIFY );
 ConVar sv_report_client_settings("sv_report_client_settings", "0", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+
+ConVar dp_freeze_time( "dp_freeze_time", "8", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+ConVar dp_round_time( "dp_round_time", "180", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+ConVar dp_round_end_time( "dp_round_end_time", "5", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+ConVar dp_match_end_time( "dp_match_end_time", "15", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+ConVar dp_rounds_to_win( "dp_rounds_to_win", "5", FCVAR_GAMEDLL | FCVAR_NOTIFY );
+ConVar dp_max_rounds( "dp_max_rounds", "9", FCVAR_GAMEDLL | FCVAR_NOTIFY );
 
 extern ConVar mp_chattime;
 
@@ -58,8 +67,16 @@ BEGIN_NETWORK_TABLE_NOBASE( CHL2MPRules, DT_HL2MPRules )
 
 	#ifdef CLIENT_DLL
 		RecvPropBool( RECVINFO( m_bTeamPlayEnabled ) ),
+		RecvPropInt( RECVINFO( m_iDPRoundState ) ),
+		RecvPropInt( RECVINFO( m_iDPRoundNumber ) ),
+		RecvPropFloat( RECVINFO( m_flDPStateEndTime ) ),
+		RecvPropInt( RECVINFO( m_iDPWinningTeam ) ),
 	#else
 		SendPropBool( SENDINFO( m_bTeamPlayEnabled ) ),
+		SendPropInt( SENDINFO( m_iDPRoundState ), 3 ),
+		SendPropInt( SENDINFO( m_iDPRoundNumber ), 8 ),
+		SendPropFloat( SENDINFO( m_flDPStateEndTime ) ),
+		SendPropInt( SENDINFO( m_iDPWinningTeam ), 4 ),
 	#endif
 
 END_NETWORK_TABLE()
@@ -176,12 +193,17 @@ char *sTeamNames[] =
 {
 	"Unassigned",
 	"Spectator",
-	"Combine",
-	"Rebels",
+	"VGS",
+	"FUM",
 };
 
 CHL2MPRules::CHL2MPRules()
 {
+	m_iDPRoundState = DP_ROUND_WARMUP;
+	m_iDPRoundNumber = 0;
+	m_flDPStateEndTime = 0;
+	m_iDPWinningTeam = TEAM_UNASSIGNED;
+
 #ifndef CLIENT_DLL
 	// Create the team managers
 	for ( int i = 0; i < ARRAYSIZE( sTeamNames ); i++ )
@@ -293,6 +315,7 @@ void CHL2MPRules::Think( void )
 #ifndef CLIENT_DLL
 	
 	CGameRules::Think();
+	DP_Think();
 
 	if ( g_fGameOver )   // someone else quit the game already
 	{
@@ -307,44 +330,6 @@ void CHL2MPRules::Think( void )
 		}
 
 		return;
-	}
-
-//	float flTimeLimit = mp_timelimit.GetFloat() * 60;
-	float flFragLimit = fraglimit.GetFloat();
-	
-	if ( GetMapRemainingTime() < 0 )
-	{
-		GoToIntermission();
-		return;
-	}
-
-	if ( flFragLimit )
-	{
-		if( IsTeamplay() == true )
-		{
-			CTeam *pCombine = g_Teams[TEAM_COMBINE];
-			CTeam *pRebels = g_Teams[TEAM_REBELS];
-
-			if ( pCombine->GetScore() >= flFragLimit || pRebels->GetScore() >= flFragLimit )
-			{
-				GoToIntermission();
-				return;
-			}
-		}
-		else
-		{
-			// check if any player is over the frag limit
-			for ( int i = 1; i <= gpGlobals->maxClients; i++ )
-			{
-				CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
-
-				if ( pPlayer && pPlayer->FragCount() >= flFragLimit )
-				{
-					GoToIntermission();
-					return;
-				}
-			}
-		}
 	}
 
 	if ( gpGlobals->curtime > m_tmNextPeriodicThink )
@@ -1011,6 +996,11 @@ void CHL2MPRules::RestartGame()
 		m_flGameStartTime.GetForModify() = 0.0f;
 	}
 
+	m_iDPRoundState = DP_ROUND_WARMUP;
+	m_iDPRoundNumber = 0;
+	m_flDPStateEndTime = 0;
+	m_iDPWinningTeam = TEAM_UNASSIGNED;
+
 	CleanUpMap();
 	
 	// now respawn all players
@@ -1058,6 +1048,313 @@ void CHL2MPRules::RestartGame()
 		event->SetString("objective","DEATHMATCH");
 
 		gameeventmanager->FireEvent( event );
+	}
+}
+
+bool CHL2MPRules::FPlayerCanRespawn( CBasePlayer *pPlayer )
+{
+	return m_iDPRoundState == DP_ROUND_WARMUP;
+}
+
+void CHL2MPRules::PlayerSpawn( CBasePlayer *pPlayer )
+{
+	BaseClass::PlayerSpawn( pPlayer );
+
+	if ( m_iDPRoundState == DP_ROUND_FREEZE || m_iDPRoundState == DP_ROUND_END || m_iDPRoundState == DP_ROUND_MATCH_END )
+	{
+		pPlayer->AddFlag( FL_FROZEN );
+	}
+}
+
+bool CHL2MPRules::DP_TeamsHavePlayers( void )
+{
+	bool bCombine = false;
+	bool bRebels = false;
+
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( !pPlayer )
+			continue;
+
+		if ( pPlayer->GetTeamNumber() == TEAM_COMBINE )
+			bCombine = true;
+		else if ( pPlayer->GetTeamNumber() == TEAM_REBELS )
+			bRebels = true;
+
+		if ( bCombine && bRebels )
+			return true;
+	}
+
+	return false;
+}
+
+int CHL2MPRules::DP_CountAlivePlayers( int iTeam )
+{
+	int iCount = 0;
+
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( pPlayer && pPlayer->GetTeamNumber() == iTeam && pPlayer->IsAlive() )
+			iCount++;
+	}
+
+	return iCount;
+}
+
+int CHL2MPRules::DP_GetMatchWinner( void )
+{
+	CTeam *pCombine = GetGlobalTeam( TEAM_COMBINE );
+	CTeam *pRebels = GetGlobalTeam( TEAM_REBELS );
+
+	int iCombineScore = pCombine ? pCombine->GetScore() : 0;
+	int iRebelsScore = pRebels ? pRebels->GetScore() : 0;
+
+	if ( iCombineScore == iRebelsScore )
+		return TEAM_UNASSIGNED;
+
+	return iCombineScore > iRebelsScore ? TEAM_COMBINE : TEAM_REBELS;
+}
+
+bool CHL2MPRules::DP_MatchIsOver( void )
+{
+	CTeam *pCombine = GetGlobalTeam( TEAM_COMBINE );
+	CTeam *pRebels = GetGlobalTeam( TEAM_REBELS );
+	int iRoundsToWin = dp_rounds_to_win.GetInt();
+
+	if ( pCombine && pCombine->GetScore() >= iRoundsToWin )
+		return true;
+
+	if ( pRebels && pRebels->GetScore() >= iRoundsToWin )
+		return true;
+
+	return m_iDPRoundNumber >= dp_max_rounds.GetInt();
+}
+
+void CHL2MPRules::DP_RespawnAllPlayers( void )
+{
+	// ForceRespawn calls Spawn, which also pulls players out of observer mode for the new round!
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( !pPlayer )
+			continue;
+
+		if ( pPlayer->GetTeamNumber() != TEAM_COMBINE && pPlayer->GetTeamNumber() != TEAM_REBELS )
+			continue;
+
+		pPlayer->ForceRespawn();
+	}
+}
+
+void CHL2MPRules::DP_SetPlayersFrozen( bool bFrozen )
+{
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( !pPlayer || !pPlayer->IsAlive() )
+			continue;
+
+		if ( bFrozen )
+			pPlayer->AddFlag( FL_FROZEN );
+		else
+			pPlayer->RemoveFlag( FL_FROZEN );
+	}
+}
+
+void CHL2MPRules::DP_UpdateDeadPlayers( void )
+{
+	// PlayerDeathThink bails out while respawning is blocked, so hand dead players to the observer here
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( !pPlayer || pPlayer->IsObserver() )
+			continue;
+
+		if ( pPlayer->m_lifeState == LIFE_DEAD && gpGlobals->curtime > pPlayer->GetDeathTime() + DEATH_ANIMATION_TIME )
+		{
+			pPlayer->StartObserverMode( OBS_MODE_CHASE );
+		}
+	}
+}
+
+void CHL2MPRules::DP_StartRound( void )
+{
+	m_iDPRoundNumber = m_iDPRoundNumber + 1;
+	m_iDPWinningTeam = TEAM_UNASSIGNED;
+	m_iDPRoundState = DP_ROUND_FREEZE;
+	m_flDPStateEndTime = gpGlobals->curtime + dp_freeze_time.GetFloat();
+
+	CleanUpMap();
+	DP_RespawnAllPlayers();
+	DP_SetPlayersFrozen( true );
+
+	char szMessage[128];
+	Q_snprintf( szMessage, sizeof( szMessage ), "ROUND %d\nFREEZE", (int)m_iDPRoundNumber );
+	UTIL_ClientPrintAll( HUD_PRINTCENTER, szMessage );
+
+	IGameEvent *event = gameeventmanager->CreateEvent( "round_start" );
+	if ( event )
+	{
+		event->SetInt( "fraglimit", 0 );
+		event->SetInt( "priority", 6 );
+		event->SetString( "objective", "DYSTOPOLIS" );
+		gameeventmanager->FireEvent( event );
+	}
+}
+
+void CHL2MPRules::DP_EndRound( int iWinningTeam )
+{
+	m_iDPWinningTeam = iWinningTeam;
+
+	if ( iWinningTeam != TEAM_UNASSIGNED )
+	{
+		CTeam *pWinner = GetGlobalTeam( iWinningTeam );
+		if ( pWinner )
+			pWinner->AddScore( 1 );
+	}
+
+	m_iDPRoundState = DP_ROUND_END;
+	m_flDPStateEndTime = gpGlobals->curtime + dp_round_end_time.GetFloat();
+	DP_SetPlayersFrozen( true );
+
+	if ( iWinningTeam == TEAM_UNASSIGNED )
+	{
+		UTIL_ClientPrintAll( HUD_PRINTCENTER, "ROUND DRAW" );
+	}
+	else
+	{
+		char szMessage[128];
+		CTeam *pWinner = GetGlobalTeam( iWinningTeam );
+		Q_snprintf( szMessage, sizeof( szMessage ), "%s WINS THE ROUND", pWinner ? pWinner->GetName() : "TEAM" );
+		UTIL_ClientPrintAll( HUD_PRINTCENTER, szMessage );
+	}
+
+	IGameEvent *event = gameeventmanager->CreateEvent( "teamplay_round_win" );
+	if ( event )
+	{
+		event->SetInt( "team", iWinningTeam );
+		event->SetInt( "winreason", 0 );
+		event->SetBool( "full_round", false );
+		gameeventmanager->FireEvent( event );
+	}
+}
+
+void CHL2MPRules::DP_EnterWarmup( void )
+{
+	m_iDPRoundState = DP_ROUND_WARMUP;
+	m_flDPStateEndTime = 0;
+
+	DP_RespawnAllPlayers();
+	DP_SetPlayersFrozen( false );
+
+	UTIL_ClientPrintAll( HUD_PRINTCENTER, "WAITING FOR PLAYERS" );
+}
+
+void CHL2MPRules::DP_ResetMatch( void )
+{
+	CTeam *pCombine = GetGlobalTeam( TEAM_COMBINE );
+	CTeam *pRebels = GetGlobalTeam( TEAM_REBELS );
+
+	if ( pCombine )
+		pCombine->SetScore( 0 );
+
+	if ( pRebels )
+		pRebels->SetScore( 0 );
+
+	m_iDPRoundNumber = 0;
+	DP_EnterWarmup();
+}
+
+void CHL2MPRules::DP_Think( void )
+{
+	if ( g_fGameOver )
+		return;
+
+	if ( m_iDPRoundState != DP_ROUND_WARMUP )
+		DP_UpdateDeadPlayers();
+
+	float flNow = gpGlobals->curtime;
+
+	switch ( m_iDPRoundState )
+	{
+	case DP_ROUND_WARMUP:
+		if ( DP_TeamsHavePlayers() )
+			DP_StartRound();
+		break;
+
+	case DP_ROUND_FREEZE:
+		if ( flNow >= m_flDPStateEndTime )
+		{
+			m_iDPRoundState = DP_ROUND_LIVE;
+			m_flDPStateEndTime = flNow + dp_round_time.GetFloat();
+			DP_SetPlayersFrozen( false );
+			UTIL_ClientPrintAll( HUD_PRINTCENTER, "FIGHT" );
+		}
+		break;
+
+	case DP_ROUND_LIVE:
+		{
+			int iCombineAlive = DP_CountAlivePlayers( TEAM_COMBINE );
+			int iRebelsAlive = DP_CountAlivePlayers( TEAM_REBELS );
+
+			if ( iCombineAlive == 0 || iRebelsAlive == 0 )
+			{
+				if ( iCombineAlive == 0 && iRebelsAlive == 0 )
+					DP_EndRound( TEAM_UNASSIGNED );
+				else
+					DP_EndRound( iCombineAlive > 0 ? TEAM_COMBINE : TEAM_REBELS );
+			}
+			else if ( flNow >= m_flDPStateEndTime )
+			{
+				if ( iCombineAlive > iRebelsAlive )
+					DP_EndRound( TEAM_COMBINE );
+				else if ( iRebelsAlive > iCombineAlive )
+					DP_EndRound( TEAM_REBELS );
+				else
+					DP_EndRound( TEAM_UNASSIGNED );
+			}
+		}
+		break;
+
+	case DP_ROUND_END:
+		if ( flNow >= m_flDPStateEndTime )
+		{
+			if ( DP_MatchIsOver() )
+			{
+				m_iDPWinningTeam = DP_GetMatchWinner();
+				m_iDPRoundState = DP_ROUND_MATCH_END;
+				m_flDPStateEndTime = flNow + dp_match_end_time.GetFloat();
+				DP_SetPlayersFrozen( true );
+
+				if ( m_iDPWinningTeam == TEAM_UNASSIGNED )
+				{
+					UTIL_ClientPrintAll( HUD_PRINTCENTER, "MATCH DRAW" );
+				}
+				else
+				{
+					char szMessage[128];
+					CTeam *pWinner = GetGlobalTeam( m_iDPWinningTeam );
+					Q_snprintf( szMessage, sizeof( szMessage ), "%s WINS THE MATCH", pWinner ? pWinner->GetName() : "TEAM" );
+					UTIL_ClientPrintAll( HUD_PRINTCENTER, szMessage );
+				}
+			}
+			else if ( DP_TeamsHavePlayers() )
+			{
+				DP_StartRound();
+			}
+			else
+			{
+				DP_EnterWarmup();
+			}
+		}
+		break;
+
+	case DP_ROUND_MATCH_END:
+		if ( flNow >= m_flDPStateEndTime )
+			DP_ResetMatch();
+		break;
 	}
 }
 

@@ -173,7 +173,12 @@ void C_RecipientFilter::UsePredictionRules( void )
 
 	if ( !prediction->InPrediction() )
 	{
-		Assert( 0 );
+		static bool bWarned = false;
+		if ( !bWarned )
+		{
+			bWarned = true;
+			Warning( "C_RecipientFilter::UsePredictionRules called outside prediction; ignoring\n" );
+		}
 		return;
 	}
 

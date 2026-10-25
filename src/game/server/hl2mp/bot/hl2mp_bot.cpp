@@ -270,6 +270,9 @@ CON_COMMAND_F( hl2mp_bot_add, "Add a bot.", FCVAR_GAMEDLL )
 	}
 }
 
+static ConCommand bot_add_alias( "bot_add", hl2mp_bot_add, "Add a bot.", FCVAR_GAMEDLL );
+static ConCommand bot_alias( "bot", hl2mp_bot_add, "Add a bot.", FCVAR_GAMEDLL );
+
 
 //-----------------------------------------------------------------------------------------------------
 CON_COMMAND_F( hl2mp_bot_kick, "Remove a HL2MPBot by name, or all bots (\"all\").", FCVAR_GAMEDLL )

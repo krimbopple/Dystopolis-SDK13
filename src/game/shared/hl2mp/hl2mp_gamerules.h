@@ -79,6 +79,15 @@ public:
 	Vector m_vCrouchTraceMax;	
 };
 
+enum DPRoundState_t
+{
+	DP_ROUND_WARMUP = 0,
+	DP_ROUND_FREEZE,
+	DP_ROUND_LIVE,
+	DP_ROUND_END,
+	DP_ROUND_MATCH_END,
+};
+
 class CHL2MPRules : public CTeamplayRules
 {
 public:
@@ -151,12 +160,39 @@ public:
 	bool	IsTeamplay( void ) { return m_bTeamPlayEnabled;	}
 	void	CheckAllPlayersReady( void );
 
+	int		GetDPRoundState( void ) { return m_iDPRoundState; }
+	int		GetDPRoundNumber( void ) { return m_iDPRoundNumber; }
+	float	GetDPStateEndTime( void ) { return m_flDPStateEndTime; }
+	int		GetDPWinningTeam( void ) { return m_iDPWinningTeam; }
+
 	virtual bool IsConnectedUserInfoChangeAllowed( CBasePlayer *pPlayer );
+
+#ifndef CLIENT_DLL
+	virtual bool FPlayerCanRespawn( CBasePlayer *pPlayer );
+	virtual void PlayerSpawn( CBasePlayer *pPlayer );
+
+	void	DP_Think( void );
+	void	DP_StartRound( void );
+	void	DP_EndRound( int iWinningTeam );
+	void	DP_EnterWarmup( void );
+	void	DP_ResetMatch( void );
+	bool	DP_TeamsHavePlayers( void );
+	int		DP_CountAlivePlayers( int iTeam );
+	int		DP_GetMatchWinner( void );
+	bool	DP_MatchIsOver( void );
+	void	DP_RespawnAllPlayers( void );
+	void	DP_SetPlayersFrozen( bool bFrozen );
+	void	DP_UpdateDeadPlayers( void );
+#endif
 	
 private:
 	
 	CNetworkVar( bool, m_bTeamPlayEnabled );
 	CNetworkVar( float, m_flGameStartTime );
+	CNetworkVar( int, m_iDPRoundState );
+	CNetworkVar( int, m_iDPRoundNumber );
+	CNetworkVar( float, m_flDPStateEndTime );
+	CNetworkVar( int, m_iDPWinningTeam );
 	CUtlVector<EHANDLE> m_hRespawnableItemsAndWeapons;
 	float m_tmNextPeriodicThink;
 	float m_flRestartGameTime;
