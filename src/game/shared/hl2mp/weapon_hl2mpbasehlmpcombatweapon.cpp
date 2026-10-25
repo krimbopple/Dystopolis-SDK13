@@ -321,24 +321,141 @@ float CBaseHL2MPCombatWeapon::CalcViewmodelBob( void )
 //-----------------------------------------------------------------------------
 void CBaseHL2MPCombatWeapon::AddViewmodelBob( CBaseViewModel *viewmodel, Vector &origin, QAngle &angles )
 {
-	Vector	forward, right;
+	CBasePlayer *pPlayer = ToBasePlayer( viewmodel->GetOwner() );
+	if ( !pPlayer )
+		return;
+
+	float flDeltaTime = clamp( gpGlobals->frametime, 0.0f, 0.05f );
+	if ( flDeltaTime <= 0.0f )
+		return;
+
+	Vector forward, right;
 	AngleVectors( angles, &forward, &right, NULL );
 
-	CalcViewmodelBob();
+	Vector vecVelocity = pPlayer->GetLocalVelocity();
+	float flSpeed = vecVelocity.Length2D();
+	float flSpeedFrac = clamp( flSpeed / 320.0f, 0.0f, 1.0f );
+	bool bOnGround = ( pPlayer->GetFlags() & FL_ONGROUND ) != 0;
 
-	// Apply bob, but scaled down to 40%
-	VectorMA( origin, g_verticalBob * 0.1f, forward, origin );
-	
-	// Z bob a bit more
-	origin[2] += g_verticalBob * 0.1f;
-	
-	// bob the angles
-	angles[ ROLL ]	+= g_verticalBob * 0.5f;
-	angles[ PITCH ]	-= g_verticalBob * 0.4f;
+	static float s_flBobPhase = 0.0f;
+	static float s_flBobDirection = 1.0f;
+	static float s_flPrevStepTime = 0.0f;
+	static float s_flStepInterval = 0.3f;
+	static float s_flBobScale = 0.0f;
 
-	angles[ YAW ]	-= g_lateralBob  * 0.3f;
+	// Fade the bob so it isn't as abrupt when we stop moving
+	float flBobScaleTarget = 0.0f;
+	if ( bOnGround && flSpeedFrac > 0.05f )
+	{
+		flBobScaleTarget = flSpeedFrac * ( 1.0f - 0.45f * flSpeedFrac );
+	}
 
-	VectorMA( origin, g_lateralBob * 0.8f, right, origin );
+	s_flBobScale += ( flBobScaleTarget - s_flBobScale ) * MIN( 1.0f, flDeltaTime * 7.0f );
+
+	float flStepTime = pPlayer->GetStepSoundTime();
+
+	if ( bOnGround && flSpeedFrac > 0.1f && flStepTime > 0.0f )
+	{
+		if ( flStepTime > s_flPrevStepTime + 1.0f )
+		{
+			s_flStepInterval = flStepTime * 0.001f;
+			s_flBobDirection = -s_flBobDirection;
+		}
+
+		float flStepFrac = clamp( flStepTime / ( s_flStepInterval * 1000.0f ), 0.0f, 1.0f );
+		s_flBobPhase = M_PI * ( 1.0f - flStepFrac );
+	}
+	else if ( s_flBobScale < 0.02f )
+	{
+		s_flBobPhase = 0.0f;
+	}
+
+	s_flPrevStepTime = flStepTime;
+
+	float flStep = sin( s_flBobPhase ) * s_flBobDirection;
+	float flBobLateral = flStep * s_flBobScale;
+	float flVerticalWave = cos( s_flBobPhase );
+	float flBobVertical = -flVerticalWave * flVerticalWave * s_flBobScale;
+
+	origin[2] += flBobVertical * 0.9f;
+	VectorMA( origin, flBobLateral * 1.6f, right, origin );
+
+	angles[PITCH] += flBobVertical * 0.8f;
+	angles[ROLL] += flBobLateral * 1.1f;
+	angles[YAW] -= flBobLateral * 0.5f;
+
+	// Lean into strafing, as we should !
+	float flStrafeFrac = clamp( DotProduct( vecVelocity, right ) / 320.0f, -1.0f, 1.0f );
+	angles[ROLL] -= flStrafeFrac * 2.4f;
+	VectorMA( origin, -flStrafeFrac * 1.1f, right, origin );
+
+	static float s_flLastEyeYaw = 0.0f;
+	static float s_flLastEyePitch = 0.0f;
+	static float s_flTiltRoll = 0.0f;
+	static float s_flTiltPitch = 0.0f;
+	static float s_flTiltYaw = 0.0f;
+
+	QAngle eyeAngles = pPlayer->EyeAngles();
+	float flYawRate = AngleDiff( eyeAngles.y, s_flLastEyeYaw ) / flDeltaTime;
+	float flPitchRate = AngleDiff( eyeAngles.x, s_flLastEyePitch ) / flDeltaTime;
+	s_flLastEyeYaw = eyeAngles.y;
+	s_flLastEyePitch = eyeAngles.x;
+
+	float flTiltBlend = MIN( 1.0f, flDeltaTime * 20.0f );
+	s_flTiltRoll += ( clamp( -flYawRate * 0.0015f, -1.0f, 1.0f ) - s_flTiltRoll ) * flTiltBlend;
+	s_flTiltYaw += ( clamp( flYawRate * 0.0035f, -2.0f, 2.0f ) - s_flTiltYaw ) * flTiltBlend;
+	s_flTiltPitch += ( clamp( flPitchRate * 0.0025f, -1.5f, 1.5f ) - s_flTiltPitch ) * flTiltBlend;
+
+	angles[ROLL] += s_flTiltRoll;
+	angles[YAW] += s_flTiltYaw;
+	angles[PITCH] += s_flTiltPitch;
+
+	// Breathing...
+	float flTime = gpGlobals->curtime;
+	origin[2] += sin( flTime * 1.3f ) * 0.14f;
+	angles[ROLL] += sin( flTime * 0.85f ) * 0.18f;
+	angles[YAW] += sin( flTime * 0.65f ) * 0.08f;
+
+	// Airborne Drift
+	if ( !bOnGround )
+	{
+		float flAirFrac = clamp( vecVelocity.z / 400.0f, -1.0f, 1.0f );
+		origin[2] += flAirFrac * 1.0f;
+		angles[PITCH] -= flAirFrac * 1.2f;
+	}
+
+	static float s_flPrevVelocityZ = 0.0f;
+	static float s_flLandTime = 0.0f;
+
+	// Player land dip
+	if ( s_flPrevVelocityZ < -200.0f && vecVelocity.z > -50.0f )
+	{
+		s_flLandTime = gpGlobals->curtime + 0.35f;
+	}
+
+	s_flPrevVelocityZ = vecVelocity.z;
+
+	if ( gpGlobals->curtime < s_flLandTime )
+	{
+		float flLandFrac = ( s_flLandTime - gpGlobals->curtime ) / 0.35f;
+
+		origin[2] -= flLandFrac * 2.4f;
+		angles[PITCH] += flLandFrac * 2.8f;
+		angles[ROLL] += flLandFrac * 1.6f;
+	}
+
+	static float s_flRecoil = 0.0f;
+	QAngle punch = pPlayer->GetPunchAngle();
+	float flRecoilTarget = MAX( 0.0f, -punch.x );
+
+	s_flRecoil += ( flRecoilTarget - s_flRecoil ) * MIN( 1.0f, flDeltaTime * 18.0f );
+
+	float flRecoilPitch = MIN( s_flRecoil, 6.0f );
+
+	angles[PITCH] += flRecoilPitch * 1.2f;
+	angles[YAW] += punch.y * 0.35f;
+	angles[ROLL] += punch.z * 0.35f;
+	VectorMA( origin, -flRecoilPitch * 0.08f, forward, origin );
 }
 
 //-----------------------------------------------------------------------------

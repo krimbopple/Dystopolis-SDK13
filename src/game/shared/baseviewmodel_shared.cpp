@@ -460,8 +460,13 @@ float g_fMaxViewModelLag = 1.5f;
 
 ConVar sv_viewmodel_lag_do_angles( "sv_viewmodel_lag_do_angles", "1", FCVAR_CHEAT | FCVAR_REPLICATED );
 
+ConVar cl_viewmodel_lag( "cl_viewmodel_lag", "0", FCVAR_ARCHIVE, "Enable viewmodel drag lag." );
+
 void CBaseViewModel::CalcViewModelLag( Vector& origin, QAngle& angles, QAngle& original_angles )
 {
+	if ( !cl_viewmodel_lag.GetBool() )
+		return;
+
 	Vector vOriginalOrigin = origin;
 	QAngle vOriginalAngles = angles;
 
